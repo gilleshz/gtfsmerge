@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import csv
+import math
 import sys
 from pathlib import Path
 
 from gtfsmerge.io import read_source_rows, stream_write_shapes, write_feed
 from gtfsmerge.models import Feed
-from gtfsmerge.stops import coord_to_stop_id, merge_stops, remap_stop_times
+from gtfsmerge.stops import coord_to_stop_id, fuzzy_merge_stops, merge_stops, remap_stop_times
 
 
 def merge(
     sources: dict[str, Path],
     route_refs: list[str],
     output_dir: str | Path,
+    stop_merge_radius: float = 50.0,
 ) -> dict[str, int]:
     """Merge GTFS feeds from *sources*, selecting the requested *route_refs*.
 
@@ -43,7 +45,10 @@ def merge(
 
         feed.routes.extend(r for _, r in route_entries)
 
-        trips, trip_ids = _collect_trips(source_path, route_ids)
+        trips, trip_ids = _collect_trips(
+            source_path, route_ids,
+            existing_ids={t["trip_id"] for t in feed.trips if t.get("trip_id")},
+        )
         feed.trips.extend(trips)
 
         shape_ids = {t.get("shape_id", "") for t in trips if t.get("shape_id", "")}
@@ -59,7 +64,10 @@ def merge(
         if shape_ids:
             source_shape_ids[source_name] = shape_ids
 
-    feed.stops = list(global_stops.values())
+    merged_stops, fuzzy_remap = fuzzy_merge_stops(global_stops, stop_merge_radius)
+    if fuzzy_remap:
+        feed.stop_times = remap_stop_times(feed.stop_times, fuzzy_remap)
+    feed.stops = list(merged_stops.values())
 
     if source_shape_ids:
         shape_path = out / "shapes.txt"
@@ -131,13 +139,18 @@ def _resolve_winners(
     return winners
 
 
-def _collect_trips(source_path: Path, route_ids: set[str]) -> tuple[list[dict[str, str]], set[str]]:
+def _collect_trips(
+    source_path: Path, route_ids: set[str], existing_ids: set[str] | None = None,
+) -> tuple[list[dict[str, str]], set[str]]:
     trips: list[dict[str, str]] = []
     trip_ids: set[str] = set()
+    skip_ids = existing_ids or set()
     for t in read_source_rows(source_path, "trips.txt"):
+        tid = t.get("trip_id", "")
+        if tid in skip_ids:
+            continue
         if t.get("route_id", "") in route_ids:
             trips.append(t)
-            tid = t.get("trip_id", "")
             if tid:
                 trip_ids.add(tid)
     return trips, trip_ids
@@ -172,14 +185,14 @@ def _build_stop_remap(
             lon = float(s.get("stop_lon", 0))
         except (ValueError, TypeError):
             continue
+        if math.isnan(lat) or math.isnan(lon):
+            continue
         new_id = coord_to_stop_id(lat, lon)
         old_to_new[old_id] = new_id
-        new_stop = {
-            "stop_id": new_id,
-            "stop_name": s.get("stop_name", ""),
-            "stop_lat": f"{lat:.7f}",
-            "stop_lon": f"{lon:.7f}",
-        }
+        new_stop = dict(s)
+        new_stop["stop_id"] = new_id
+        new_stop["stop_lat"] = f"{lat:.7f}"
+        new_stop["stop_lon"] = f"{lon:.7f}"
         merge_stops(global_stops, new_stop)
     return old_to_new
 
@@ -188,9 +201,12 @@ def _collect_agencies(source_path: Path, feed: Feed) -> None:
     existing_ids = {a.get("agency_id", "") for a in feed.agencies}
     for a in read_source_rows(source_path, "agency.txt"):
         aid = a.get("agency_id", "")
-        if aid and aid not in existing_ids:
-            feed.agencies.append(a)
-            existing_ids.add(aid)
+        if aid in existing_ids:
+            continue
+        if not aid and existing_ids:
+            continue
+        feed.agencies.append(a)
+        existing_ids.add(aid)
 
 
 def _collect_calendars(source_path: Path, service_ids: set[str], feed: Feed) -> None:
@@ -200,10 +216,13 @@ def _collect_calendars(source_path: Path, service_ids: set[str], feed: Feed) -> 
         if sid in service_ids and sid not in existing_services:
             feed.calendars.append(c)
             existing_services.add(sid)
+    existing_dates = {(cd.get("service_id", ""), cd.get("date", "")) for cd in feed.calendar_dates}
     for cd in read_source_rows(source_path, "calendar_dates.txt"):
         sid = cd.get("service_id", "")
-        if sid in service_ids:
+        date = cd.get("date", "")
+        if sid in service_ids and (sid, date) not in existing_dates:
             feed.calendar_dates.append(cd)
+            existing_dates.add((sid, date))
 
 
 def _count_shape_points(shape_path: Path) -> int:
@@ -235,6 +254,7 @@ def _validate(feed: Feed) -> None:
     service_ids = {c["service_id"] for c in feed.calendars}
     service_ids.update(cd["service_id"] for cd in feed.calendar_dates)
     stop_ids = {s["stop_id"] for s in feed.stops}
+    shape_ids = {s["shape_id"] for s in feed.shapes if s.get("shape_id")}
 
     for t in feed.trips:
         if t["route_id"] and t["route_id"] not in route_ids:
@@ -244,6 +264,11 @@ def _validate(feed: Feed) -> None:
         if t["service_id"] and service_ids and t["service_id"] not in service_ids:
             issues.append(
                 f"trips.txt: trip {t['trip_id']} references missing service {t['service_id']}"
+            )
+        shape_id = t.get("shape_id", "")
+        if shape_id and shape_ids and shape_id not in shape_ids:
+            issues.append(
+                f"trips.txt: trip {t['trip_id']} references missing shape {shape_id}"
             )
 
     for st in feed.stop_times:

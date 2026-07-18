@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from gtfsmerge.stops import coord_to_stop_id, merge_stops, remap_stop_times
+from gtfsmerge.stops import (
+    coord_to_stop_id,
+    fuzzy_merge_stops,
+    haversine_distance_m,
+    merge_stops,
+    normalize_stop_name,
+    remap_stop_times,
+)
 
 
 class TestCoordToStopId:
@@ -90,3 +97,102 @@ class TestMergeStops:
         merge_stops(stops, {"stop_id": "", "stop_name": "Empty"})
         assert "" not in stops
         assert len(stops) == 0
+
+
+class TestNormalizeStopName:
+    def test_lowercases(self) -> None:
+        assert normalize_stop_name("ROI GEORGE") == "roi george"
+
+    def test_strips_and_collapses_whitespace(self) -> None:
+        assert normalize_stop_name("  Roi   George ") == "roi george"
+
+    def test_title_case_preserved_as_lower(self) -> None:
+        assert normalize_stop_name("Roi George") == "roi george"
+
+    def test_mixed(self) -> None:
+        assert normalize_stop_name("Gare De Metz-Ville") == "gare de metz-ville"
+
+
+class TestHaversineDistance:
+    def test_same_point(self) -> None:
+        assert haversine_distance_m(49.12, 6.18, 49.12, 6.18) == 0.0
+
+    def test_roughly_111km_per_degree(self) -> None:
+        d = haversine_distance_m(49.0, 6.0, 50.0, 6.0)
+        assert 110_000 < d < 112_000
+
+    def test_short_distance(self) -> None:
+        d = haversine_distance_m(49.1200, 6.1800, 49.1204, 6.1804)
+        assert 40 < d < 60
+
+
+class TestFuzzyMergeStops:
+    def test_no_merge_when_different_names(self) -> None:
+        stops = {
+            "A": {"stop_id": "A", "stop_name": "Central", "stop_lat": "49.1200", "stop_lon": "6.1800"},
+            "B": {"stop_id": "B", "stop_name": "North", "stop_lat": "49.1204", "stop_lon": "6.1804"},
+        }
+        merged, remap = fuzzy_merge_stops(stops, 50.0)
+        assert len(merged) == 2
+        assert remap == {}
+
+    def test_no_merge_when_too_far(self) -> None:
+        stops = {
+            "A": {"stop_id": "A", "stop_name": "Central", "stop_lat": "49.1200", "stop_lon": "6.1800"},
+            "B": {"stop_id": "B", "stop_name": "Central", "stop_lat": "49.1300", "stop_lon": "6.1900"},
+        }
+        merged, remap = fuzzy_merge_stops(stops, 50.0)
+        assert len(merged) == 2
+        assert remap == {}
+
+    def test_merges_same_name_within_radius(self) -> None:
+        stops = {
+            "A": {"stop_id": "A", "stop_name": "Central", "stop_lat": "49.1200", "stop_lon": "6.1800"},
+            "B": {"stop_id": "B", "stop_name": "Central", "stop_lat": "49.1202", "stop_lon": "6.1802"},
+        }
+        merged, remap = fuzzy_merge_stops(stops, 50.0)
+        assert len(merged) == 1
+        assert remap == {"B": "A"}
+
+    def test_merges_case_insensitive(self) -> None:
+        stops = {
+            "A": {"stop_id": "A", "stop_name": "Roi George", "stop_lat": "49.1200", "stop_lon": "6.1800"},
+            "B": {"stop_id": "B", "stop_name": "ROI GEORGE", "stop_lat": "49.1202", "stop_lon": "6.1802"},
+        }
+        merged, remap = fuzzy_merge_stops(stops, 50.0)
+        assert len(merged) == 1
+        assert remap == {"B": "A"}
+
+    def test_merges_with_extra_whitespace(self) -> None:
+        stops = {
+            "A": {"stop_id": "A", "stop_name": "  Roi  George ", "stop_lat": "49.1200", "stop_lon": "6.1800"},
+            "B": {"stop_id": "B", "stop_name": "Roi George", "stop_lat": "49.1202", "stop_lon": "6.1802"},
+        }
+        merged, remap = fuzzy_merge_stops(stops, 50.0)
+        assert len(merged) == 1
+
+    def test_zero_radius_disables_merge(self) -> None:
+        stops = {
+            "A": {"stop_id": "A", "stop_name": "Central", "stop_lat": "49.1200", "stop_lon": "6.1800"},
+            "B": {"stop_id": "B", "stop_name": "Central", "stop_lat": "49.1202", "stop_lon": "6.1802"},
+        }
+        merged, remap = fuzzy_merge_stops(stops, 0.0)
+        assert len(merged) == 2
+        assert remap == {}
+
+    def test_three_way_merge(self) -> None:
+        stops = {
+            "A": {"stop_id": "A", "stop_name": "Central", "stop_lat": "49.1200", "stop_lon": "6.1800"},
+            "B": {"stop_id": "B", "stop_name": "Central", "stop_lat": "49.1202", "stop_lon": "6.1802"},
+            "C": {"stop_id": "C", "stop_name": "Central", "stop_lat": "49.1201", "stop_lon": "6.1801"},
+        }
+        merged, remap = fuzzy_merge_stops(stops, 50.0)
+        assert len(merged) == 1
+
+    def test_empty_name_stops_not_merged(self) -> None:
+        stops = {
+            "A": {"stop_id": "A", "stop_name": "", "stop_lat": "49.1200", "stop_lon": "6.1800"},
+            "B": {"stop_id": "B", "stop_name": "", "stop_lat": "49.1202", "stop_lon": "6.1802"},
+        }
+        merged, remap = fuzzy_merge_stops(stops, 50.0)
+        assert len(merged) == 2

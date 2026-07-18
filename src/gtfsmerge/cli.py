@@ -62,6 +62,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="comma-separated route refs (short_names) to include; omit to include all",
     )
+    parser.add_argument(
+        "--stop-merge-radius",
+        type=float,
+        default=50.0,
+        metavar="METRES",
+        help="merge nearby stops with the same normalised name within this radius (default: 50 m; 0 disables)",
+    )
 
     return parser
 
@@ -83,7 +90,7 @@ def main(argv: list[str] | None = None) -> None:
     route_refs = args.routes or []
 
     try:
-        merge(sources, route_refs, args.output)
+        merge(sources, route_refs, args.output, args.stop_merge_radius)
     except Exception as exc:
         sys.stderr.write(f"error: {exc}\n")
         sys.exit(1)

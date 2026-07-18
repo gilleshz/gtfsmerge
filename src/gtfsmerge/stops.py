@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+_EARTH_RADIUS_M = 6_378_137.0
 
 
 def coord_to_stop_id(lat: Any, lon: Any) -> str:
@@ -50,3 +53,84 @@ def merge_stops(
     if key not in stops_by_new_id:
         stops_by_new_id[key] = dict(new_stop)
     return stops_by_new_id
+
+
+def normalize_stop_name(name: str) -> str:
+    """Normalize a stop name for fuzzy comparison.
+
+    Lowercases, strips, and collapses whitespace so that
+    ``"  ROI  GEORGE "`` and ``"Roi George"`` compare equal.
+    """
+    return " ".join(name.lower().split())
+
+
+def haversine_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Compute the great-circle distance in metres between two points."""
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2.0) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2.0) ** 2
+    )
+    return 2.0 * _EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
+
+def fuzzy_merge_stops(
+    stops_by_id: dict[str, dict[str, str]],
+    radius_m: float = 50.0,
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """Merge nearby stops that share the same normalized name.
+
+    Applied as a second pass after coordinate-based dedup. Two stops that
+    landed on different coordinate IDs (e.g. because OSM and GTFS placed
+    the same station 20 m apart) are merged when their normalized names
+    match and the distance between them is ≤ *radius_m*.
+
+    Returns ``(merged_stops, old_id_to_new_id)`` where *merged_stops* is
+    the deduplicated stop map and *old_id_to_new_id* maps removed stop IDs
+    to the canonical ID they should be replaced with.
+    """
+    if radius_m <= 0.0:
+        return dict(stops_by_id), {}
+
+    stops_list = list(stops_by_id.items())
+    remap: dict[str, str] = {}
+
+    for i, (id_a, stop_a) in enumerate(stops_list):
+        if id_a in remap:
+            continue
+        name_a = normalize_stop_name(stop_a.get("stop_name", ""))
+        if not name_a:
+            continue
+        try:
+            lat_a = float(stop_a.get("stop_lat", 0))
+            lon_a = float(stop_a.get("stop_lon", 0))
+        except (ValueError, TypeError):
+            continue
+
+        for j in range(i + 1, len(stops_list)):
+            id_b, stop_b = stops_list[j]
+            if id_b in remap:
+                continue
+            name_b = normalize_stop_name(stop_b.get("stop_name", ""))
+            if name_a != name_b:
+                continue
+            try:
+                lat_b = float(stop_b.get("stop_lat", 0))
+                lon_b = float(stop_b.get("stop_lon", 0))
+            except (ValueError, TypeError):
+                continue
+            if haversine_distance_m(lat_a, lon_a, lat_b, lon_b) <= radius_m:
+                remap[id_b] = id_a
+
+    if not remap:
+        return dict(stops_by_id), remap
+
+    merged: dict[str, dict[str, str]] = {}
+    for sid, stop in stops_by_id.items():
+        if sid not in remap:
+            merged[sid] = stop
+
+    return merged, remap

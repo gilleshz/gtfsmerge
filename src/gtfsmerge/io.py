@@ -71,7 +71,7 @@ def _read_zip_rows(zip_path: Path, filename: str) -> Iterator[dict[str, str]]:
 
 def _find_matching_file(names: list[str], filename: str) -> str | None:
     for name in names:
-        if name.endswith(filename) or name == filename:
+        if name == filename or name.endswith("/" + filename):
             return name
     return None
 
@@ -122,9 +122,13 @@ def stream_write_shapes(
         for source_name, shape_ids in source_shape_ids.items():
             if not shape_ids:
                 continue
+            source_shape_ids_pending = shape_ids - written
+            if not source_shape_ids_pending:
+                continue
             source_path = sources[source_name]
             for row in read_source_rows(source_path, "shapes.txt"):
-                if row.get("shape_id", "") in shape_ids:
+                sid = row.get("shape_id", "")
+                if sid in source_shape_ids_pending:
                     writer.writerow(row)
-                    written.add(row.get("shape_id", ""))
+                    written.add(sid)
     return written

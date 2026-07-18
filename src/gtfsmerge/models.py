@@ -104,7 +104,16 @@ class Stop:
     location_type: str = ""
     parent_station: str = ""
 
-    REQUIRED_FIELDS = ["stop_id", "stop_name", "stop_lat", "stop_lon"]
+    REQUIRED_FIELDS = [
+        "stop_id",
+        "stop_name",
+        "stop_lat",
+        "stop_lon",
+        "stop_desc",
+        "zone_id",
+        "location_type",
+        "parent_station",
+    ]
 
 
 @dataclass(frozen=True)
@@ -122,6 +131,7 @@ class StopTime:
         "departure_time",
         "stop_id",
         "stop_sequence",
+        "shape_dist_traveled",
     ]
 
 
@@ -138,6 +148,7 @@ class ShapePoint:
         "shape_pt_lat",
         "shape_pt_lon",
         "shape_pt_sequence",
+        "shape_dist_traveled",
     ]
 
 

@@ -46,7 +46,8 @@ def merge(
         feed.routes.extend(r for _, r in route_entries)
 
         trips, trip_ids = _collect_trips(
-            source_path, route_ids,
+            source_path,
+            route_ids,
             existing_ids={t["trip_id"] for t in feed.trips if t.get("trip_id")},
         )
         feed.trips.extend(trips)
@@ -140,7 +141,9 @@ def _resolve_winners(
 
 
 def _collect_trips(
-    source_path: Path, route_ids: set[str], existing_ids: set[str] | None = None,
+    source_path: Path,
+    route_ids: set[str],
+    existing_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, str]], set[str]]:
     trips: list[dict[str, str]] = []
     trip_ids: set[str] = set()
@@ -267,9 +270,7 @@ def _validate(feed: Feed) -> None:
             )
         shape_id = t.get("shape_id", "")
         if shape_id and shape_ids and shape_id not in shape_ids:
-            issues.append(
-                f"trips.txt: trip {t['trip_id']} references missing shape {shape_id}"
-            )
+            issues.append(f"trips.txt: trip {t['trip_id']} references missing shape {shape_id}")
 
     for st in feed.stop_times:
         if st["trip_id"] not in trip_ids:

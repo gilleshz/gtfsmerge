@@ -112,6 +112,12 @@ class TestNormalizeStopName:
     def test_mixed(self) -> None:
         assert normalize_stop_name("Gare De Metz-Ville") == "gare de metz-ville"
 
+    def test_accented_vs_unaccented(self) -> None:
+        assert normalize_stop_name("RÉPUBLIQUE") == normalize_stop_name("République")
+
+    def test_accented_lowercase_vs_unaccented(self) -> None:
+        assert normalize_stop_name("république") == normalize_stop_name("REPUBLIQUE")
+
 
 class TestHaversineDistance:
     def test_same_point(self) -> None:

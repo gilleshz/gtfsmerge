@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import unicodedata
 from typing import Any
 
 _EARTH_RADIUS_M = 6_378_137.0
@@ -58,10 +59,13 @@ def merge_stops(
 def normalize_stop_name(name: str) -> str:
     """Normalize a stop name for fuzzy comparison.
 
-    Lowercases, strips, and collapses whitespace so that
-    ``"  ROI  GEORGE "`` and ``"Roi George"`` compare equal.
+    Lowercases, strips accents, and collapses whitespace so that
+    ``"  ROI  GEORGE "``, ``"Roi George"``, ``"RÉPUBLIQUE"`` and
+    ``"République"`` compare equal.
     """
-    return " ".join(name.lower().split())
+    nfkd = unicodedata.normalize("NFKD", name.lower())
+    ascii_name = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return " ".join(ascii_name.split())
 
 
 def haversine_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

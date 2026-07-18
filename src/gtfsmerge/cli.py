@@ -67,7 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=50.0,
         metavar="METRES",
-        help="merge nearby stops with the same normalised name within this radius (default: 50 m; 0 disables)",
+        help="merge nearby stops with matching name within this radius in metres (0 disables)",
     )
 
     return parser

@@ -68,6 +68,10 @@ def merge(
     merged_stops, fuzzy_remap = fuzzy_merge_stops(global_stops, stop_merge_radius)
     if fuzzy_remap:
         feed.stop_times = remap_stop_times(feed.stop_times, fuzzy_remap)
+        for stop in merged_stops.values():
+            ps = stop.get("parent_station", "")
+            if ps and ps in fuzzy_remap:
+                stop["parent_station"] = fuzzy_remap[ps]
     feed.stops = list(merged_stops.values())
 
     if source_shape_ids:

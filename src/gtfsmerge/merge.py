@@ -74,6 +74,12 @@ def merge(
                 stop["parent_station"] = fuzzy_remap[ps]
     feed.stops = list(merged_stops.values())
 
+    valid_ids = {s["stop_id"] for s in feed.stops}
+    for stop in feed.stops:
+        ps = stop.get("parent_station", "")
+        if ps and ps not in valid_ids:
+            stop["parent_station"] = ""
+
     if source_shape_ids:
         shape_path = out / "shapes.txt"
         written_shapes = stream_write_shapes(shape_path, sources, source_shape_ids)

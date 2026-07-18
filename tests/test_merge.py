@@ -266,3 +266,77 @@ class TestParentStationRemap:
         parent_a_count = stops_content.count("Parent A")
         assert parent_a_count == 1, f"Expected 1 'Parent A' stop, got {parent_a_count}"
         assert "Parent A" in stops_content
+
+    def test_dangling_parent_station_cleared(self, tmp_path: Path) -> None:
+        feed = tmp_path / "feed"
+        build_gtfs_dir(
+            feed,
+            {
+                "agency.txt": (
+                    ["agency_id", "agency_name", "agency_url", "agency_timezone"],
+                    [["a", "Agency A", "https://a.example", "Europe/Paris"]],
+                ),
+                "routes.txt": (
+                    [
+                        "route_id",
+                        "agency_id",
+                        "route_short_name",
+                        "route_long_name",
+                        "route_type",
+                        "route_color",
+                        "route_text_color",
+                    ],
+                    [["r_L1", "a", "L1", "Line 1", "3", "FF0000", "FFFFFF"]],
+                ),
+                "trips.txt": (
+                    ["route_id", "service_id", "trip_id"],
+                    [["r_L1", "WEEK", "t_L1"]],
+                ),
+                "stops.txt": (
+                    ["stop_id", "stop_name", "stop_lat", "stop_lon", "parent_station"],
+                    [
+                        ["child_A", "Child A", "49.1200", "6.1800", "parent_X"],
+                        ["parent_X", "Parent X", "49.1300", "6.1900", ""],
+                    ],
+                ),
+                "stop_times.txt": (
+                    ["trip_id", "arrival_time", "departure_time", "stop_id", "stop_sequence"],
+                    [
+                        ["t_L1", "08:00:00", "08:00:00", "child_A", "1"],
+                    ],
+                ),
+                "calendar.txt": (
+                    [
+                        "service_id",
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday",
+                        "saturday",
+                        "sunday",
+                        "start_date",
+                        "end_date",
+                    ],
+                    [["WEEK", "1", "1", "1", "1", "1", "0", "0", "20260101", "20261231"]],
+                ),
+            },
+        )
+
+        output = tmp_path / "out"
+        merge({"feed": feed}, ["L1"], output)
+
+        stops_content = (output / "stops.txt").read_text()
+        assert "parent_X" not in stops_content
+        assert "Child A" in stops_content
+        assert "parent_station" in stops_content
+        lines = stops_content.strip().split("\n")
+        header = lines[0]
+        cols = header.split(",")
+        ps_idx = cols.index("parent_station")
+        for line in lines[1:]:
+            fields = line.split(",")
+            if len(fields) > ps_idx:
+                assert fields[ps_idx] == "", (
+                    f"stop {fields[0]} has dangling parent_station={fields[ps_idx]}"
+                )
